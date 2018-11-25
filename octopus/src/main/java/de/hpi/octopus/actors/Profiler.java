@@ -12,7 +12,6 @@ import akka.event.LoggingAdapter;
 import de.hpi.octopus.actors.Worker.WorkMessage;
 import lombok.AllArgsConstructor;
 import lombok.Data;
-import scala.Int;
 
 public class Profiler extends AbstractActor {
 
@@ -82,6 +81,14 @@ public class Profiler extends AbstractActor {
 		private int length;
 	}
 
+	@Data @AllArgsConstructor @SuppressWarnings("unused")
+	public static class CompletionMessageFindHash extends Profiler.CompletionMessage {
+		private static final long serialVersionUID = -6823000111281007815L;
+		private CompletionMessageFindHash() {}
+		protected status result;
+		private String hash;
+	}
+
 	/////////////////
 	// Actor State //
 	/////////////////
@@ -98,7 +105,16 @@ public class Profiler extends AbstractActor {
 	private int currentRowNumber;
 	private final Map<Integer, String> plainTextPasswords = new HashMap<>();
 	private final Map<Integer, Integer> prefixes = new HashMap<>();
-	private final Map<Integer, Integer> longestGeneSubString = new HashMap<>();
+	private final Map<Integer, Pair> longestGeneSubString = new HashMap<>();
+	private Map<Integer, String> genes = new HashMap<>();
+	private final Map<Integer, String> finalHashes = new HashMap<>();
+
+	@Data @AllArgsConstructor
+	private final class Pair {
+		public int partnerId;
+		public int length;
+	}
+
 
 	private TaskMessageCrackPasswords task;
 
@@ -139,7 +155,7 @@ public class Profiler extends AbstractActor {
 
 	private void handle(TaskMessage message){
 		this.handle(new TaskMessageCrackPasswords(message.hashedPasswords));
-		this.startGeneComparision(message.genes);
+		this.genes = message.genes;
 	}
 	
 	private void handle(TaskMessageCrackPasswords message) {
@@ -192,7 +208,7 @@ public class Profiler extends AbstractActor {
 								Integer id = entry.getKey();
 								String plainTextPassword = entry.getValue();
 
-								int index = passwordsWithPositivePrefix.indexOf(plainTextPassword);
+								int index = passwordsWithPositivePrefix.indexOf(Integer.parseInt(plainTextPassword));
 								if (index < 0) {
 									this.prefixes.put(id, -1);
 								}
@@ -201,6 +217,7 @@ public class Profiler extends AbstractActor {
 								}
 							}
 							this.log.info("FINAL PASSWORDS WITH PREFIX 1: " + Arrays.toString(passwordsWithPositivePrefix.toArray()));
+							this.startGeneComparision();
 						}
 					}
 				}
@@ -209,8 +226,32 @@ public class Profiler extends AbstractActor {
 					Worker.WorkMessageGeneComparision workMessage = (Worker.WorkMessageGeneComparision) work;
 					this.report(completionMessage);
 
-					if (unassignedWork.isEmpty() && busyWorkers.isEmpty()){
+					final int currentLength1 = longestGeneSubString.getOrDefault(workMessage.getFirstID(), new Pair(-1, 0)).length;
+					final int currentLength2 = longestGeneSubString.getOrDefault(workMessage.getSecondID(), new Pair(-1, 0)).length;
 
+					if (completionMessage.length > currentLength1) {
+						longestGeneSubString.put(workMessage.getFirstID(), new Pair(workMessage.getSecondID(), completionMessage.length));
+					}
+					if (completionMessage.length > currentLength2) {
+						longestGeneSubString.put(workMessage.getSecondID(), new Pair(workMessage.getFirstID(), completionMessage.length));
+					}
+
+					if (unassignedWork.isEmpty() && busyWorkers.isEmpty()){
+						this.log.info("Calculated longest gene overlaps" + Arrays.toString(longestGeneSubString.values().toArray()));
+
+						this.prefixes.forEach((id, prefix) -> this.assign(new Worker.WorkMessageFindHash(id, prefix == 1 ? "1" : "0", longestGeneSubString.get(id).partnerId)));
+					}
+				} else if (work instanceof Worker.WorkMessageFindHash) {
+					CompletionMessageFindHash completionMessage = (CompletionMessageFindHash) message;
+					Worker.WorkMessageFindHash workMessage = (Worker.WorkMessageFindHash) work;
+					this.report(completionMessage);
+
+					finalHashes.put(workMessage.getId(), completionMessage.hash);
+
+					if (unassignedWork.isEmpty() && busyWorkers.isEmpty()){
+						this.log.info("Done!!!");
+
+						finalHashes.forEach((id, hash) -> this.log.warning("ID: " + id + " Hash: " + hash));
 					}
 				}
 				break;
@@ -257,6 +298,8 @@ public class Profiler extends AbstractActor {
 	private void report(CompletionMessageGeneComparsion completion) {
 		this.log.info("Finished comparing two genes.");
 	}
+
+	private void report(CompletionMessageFindHash completion) { this.log.info("Found hash " + completion.hash); }
 
 	private String[] calculateSixDigitNumbers(){
 		String[] sixDigitNumbers = new String[1000000];
@@ -329,14 +372,14 @@ public class Profiler extends AbstractActor {
 		}
 	}
 
-	private void startGeneComparision(Map<Integer, String> genes) {
-		for (Map.Entry<Integer,String> entry : genes.entrySet()) {
-			Integer firstID = entry.getKey();
-			String firstRNA = entry.getValue();
+	private void startGeneComparision() {
+		for (Map.Entry<Integer,String> entry1 : this.genes.entrySet()) {
+			Integer firstID = entry1.getKey();
+			String firstRNA = entry1.getValue();
 
-			for (Map.Entry<Integer, String> entry : genes.entrySet()) {
-				Integer secondID = entry.getKey();
-				String secondRNA = entry.getValue();
+			for (Map.Entry<Integer, String> entry2 : this.genes.entrySet()) {
+				Integer secondID = entry2.getKey();
+				String secondRNA = entry2.getValue();
 
 				if (firstID < secondID) {
 					this.assign(new Worker.WorkMessageGeneComparision(firstRNA, secondRNA, firstID, secondID));

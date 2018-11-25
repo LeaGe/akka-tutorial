@@ -40,7 +40,6 @@ public class OctopusApp {
 
             switch (jCommander.getParsedCommand()) {
                 case OctopusMaster.MASTER_ROLE:
-                    System.out.println(masterCommand.csv);
                     File csvData = new File(masterCommand.csv);
                     CSVParser parser = CSVParser.parse(csvData, Charset.forName("UTF-8"), CSVFormat.DEFAULT.withDelimiter(';'));
                     HashMap<Integer, String> originalPasswordHashes = new HashMap<>();
@@ -115,7 +114,7 @@ public class OctopusApp {
             return DEFAULT_MASTER_PORT;
         }
 
-        @Parameter(names = {"-c", "--csv"}, description = "location of csv-file", required = true)
+        @Parameter(names = {"-i", "--input"}, description = "location of csv-file", required = true)
         String csv;
     }
 

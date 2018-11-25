@@ -45,12 +45,5 @@ public class OctopusMaster extends OctopusSystem {
 				system.actorSelection("/user/" + Profiler.DEFAULT_NAME).tell(new Profiler.TaskMessage(originalPasswordHashes, originalGeneSequences), ActorRef.noSender());
 			}
 		});
-		/*
-		final Scanner scanner = new Scanner(System.in);
-		String line = scanner.nextLine();
-		scanner.close();
-		
-		int attributes = Integer.parseInt(line);
-		*/
 	}
 }

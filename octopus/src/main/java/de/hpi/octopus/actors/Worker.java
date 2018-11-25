@@ -6,8 +6,8 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
+import java.util.Random;
 
 import akka.actor.AbstractActor;
 import akka.actor.Props;
@@ -73,6 +73,15 @@ public class Worker extends AbstractActor {
 		private int secondID;
 	}
 
+	@Data @AllArgsConstructor @SuppressWarnings("unused")
+	public static class WorkMessageFindHash extends WorkMessage {
+		private static final long serialVersionUID = -7643190061869062315L;
+		private WorkMessageFindHash() {}
+		private int id;
+		private String prefix;
+		private int content;
+	}
+
 	/////////////////
 	// Actor State //
 	/////////////////
@@ -106,6 +115,7 @@ public class Worker extends AbstractActor {
 				.match(WorkMessagePasswordCracking.class, this::handle)
 				.match(WorkMessageLinearCombination.class, this::handle)
 				.match(WorkMessageGeneComparision.class, this::handle)
+				.match(WorkMessageFindHash.class, this::handle)
 				.matchAny(object -> this.log.info("Received unknown message: \"{}\"", object.toString()))
 				.build();
 	}
@@ -158,27 +168,71 @@ public class Worker extends AbstractActor {
 	private void handle(WorkMessageGeneComparision message) {
 		this.log.info("Recieved work package for gene comparision.");
 
-		int length = 42;
+		int length = this.longestOverlap(message.first, message.second).length();
 
 		this.sender().tell(new Profiler.CompletionMessageGeneComparsion(Profiler.CompletionMessageGeneComparsion.status.SUCCESS, length), this.self());
 	}
-	
-	private boolean isPrime(long n) {
-		
-		// Check for the most basic primes
-		if (n == 1 || n == 2 || n == 3)
-			return true;
 
-		// Check if n is an even number
-		if (n % 2 == 0)
-			return false;
+	private void handle(WorkMessageFindHash message) {
+		this.log.info("Received work package for hash search.");
+		final int prefixLength = 5;
+		final String prefix = message.prefix;
+		final String content = Integer.toString(message.content);
 
-		// Check the odds
-		for (long i = 3; i * i <= n; i += 2)
-			if (n % i == 0)
-				return false;
-		
-		return true;
+		StringBuilder fullPrefixBuilder = new StringBuilder();
+		for (int i = 0; i < prefixLength; i++)
+			fullPrefixBuilder.append(prefix);
+
+		Random rand = new Random(13);
+
+		String fullPrefix = fullPrefixBuilder.toString();
+		int nonce = 0;
+		while (true) {
+			nonce = rand.nextInt();
+			String hash = this.calulateHash(content + nonce);
+			if (hash.startsWith(fullPrefix)) {
+				this.sender().tell(new Profiler.CompletionMessageFindHash(Profiler.CompletionMessageFindHash.status.SUCCESS, hash), this.self());
+				break;
+			}
+		}
+	}
+
+	private String longestOverlap(String str1, String str2) {
+		if (str1.isEmpty() || str2.isEmpty())
+			return "";
+
+		if (str1.length() > str2.length()) {
+			String temp = str1;
+			str1 = str2;
+			str2 = temp;
+		}
+
+		int[] currentRow = new int[str1.length()];
+		int[] lastRow = str2.length() > 1 ? new int[str1.length()] : null;
+		int longestSubstringLength = 0;
+		int longestSubstringStart = 0;
+
+		for (int str2Index = 0; str2Index < str2.length(); str2Index++) {
+			char str2Char = str2.charAt(str2Index);
+			for (int str1Index = 0; str1Index < str1.length(); str1Index++) {
+				int newLength;
+				if (str1.charAt(str1Index) == str2Char) {
+					newLength = str1Index == 0 || str2Index == 0 ? 1 : lastRow[str1Index - 1] + 1;
+
+					if (newLength > longestSubstringLength) {
+						longestSubstringLength = newLength;
+						longestSubstringStart = str1Index - (newLength - 1);
+					}
+				} else {
+					newLength = 0;
+				}
+				currentRow[str1Index] = newLength;
+			}
+			int[] temp = currentRow;
+			currentRow = lastRow;
+			lastRow = temp;
+		}
+		return str1.substring(longestSubstringStart, longestSubstringStart + longestSubstringLength);
 	}
 
 	private String calulateHash(String password) {
