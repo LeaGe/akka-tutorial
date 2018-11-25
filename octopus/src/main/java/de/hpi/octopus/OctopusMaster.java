@@ -1,5 +1,7 @@
 package de.hpi.octopus;
 
+import java.sql.Array;
+import java.util.HashMap;
 import java.util.Scanner;
 
 import com.typesafe.config.Config;
@@ -15,7 +17,7 @@ public class OctopusMaster extends OctopusSystem {
 	
 	public static final String MASTER_ROLE = "master";
 
-	public static void start(String actorSystemName, int workers, String host, int port) {
+	public static void start(String actorSystemName, int workers, String host, int port, HashMap<Integer, String> originalPasswordHashes, HashMap<Integer, String> originalGeneSequences) {
 
 		final Config config = createConfiguration(actorSystemName, MASTER_ROLE, host, port, host, port);
 		
@@ -39,15 +41,16 @@ public class OctopusMaster extends OctopusSystem {
 			//			new AdaptiveLoadBalancingPool(SystemLoadAverageMetricsSelector.getInstance(), 0),
 			//			new ClusterRouterPoolSettings(10000, workers, true, new HashSet<>(Arrays.asList("master", "slave"))))
 			//		.props(Props.create(Worker.class)), "router");
+
+				system.actorSelection("/user/" + Profiler.DEFAULT_NAME).tell(new Profiler.TaskMessage(originalPasswordHashes, originalGeneSequences), ActorRef.noSender());
 			}
 		});
-		
+		/*
 		final Scanner scanner = new Scanner(System.in);
 		String line = scanner.nextLine();
 		scanner.close();
 		
 		int attributes = Integer.parseInt(line);
-		
-		system.actorSelection("/user/" + Profiler.DEFAULT_NAME).tell(new Profiler.TaskMessage(attributes), ActorRef.noSender());
+		*/
 	}
 }
