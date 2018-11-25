@@ -57,10 +57,9 @@ public class Worker extends AbstractActor {
 	public static class WorkMessageLinearCombination extends WorkMessage {
 		private static final long serialVersionUID = -7643194361869062395L;
 		private WorkMessageLinearCombination() {}
-		private List<List<Integer>> previousRow;
-		private int password;
-		private int startIndex;
-		private int endIndex;
+		private int[] numbers;
+		private long start;
+		private long end;
 	}
 
 	@Data @AllArgsConstructor @SuppressWarnings("unused")
@@ -159,10 +158,35 @@ public class Worker extends AbstractActor {
 		this.log.info("test: " + this.calculateHashes(numbers)[0] + " ###AND### " + this.calculateHashes(numbers)[1]);
 		*/
 
-		this.log.info("Recieved work package. Smallest index: " + message.startIndex + ". Biggest Index: " + message.endIndex);
-		List<List<Integer>> currentRow = this.calculateNewRow(message.previousRow, message.password, message.startIndex, message.endIndex);
+		this.log.info("Recieved work package. Smallest index: " + Long.toString(message.start, 2) + " - " + Long.toString(message.end, 2));
 
-		this.sender().tell(new Profiler.CompletionMessageLinearCombination(Profiler.CompletionMessageLinearCombination.status.SUCCESS, currentRow), this.self());
+		for (long a = message.start; a < message.end; a++) {
+			String binary = Long.toBinaryString(a);
+
+			int[] prefixes = new int[message.numbers.length];
+			for (int i = 0; i < prefixes.length; i++)
+				prefixes[i] = 1;
+
+			int i = 0;
+			for (int j = binary.length() - 1; j >= 0; j--) {
+				if (binary.charAt(j) == '1')
+					prefixes[i] = -1;
+				i++;
+			}
+
+			if (this.sum(message.numbers, prefixes) == 0) {
+				this.sender().tell(new Profiler.CompletionMessageLinearCombination(Profiler.CompletionMessageLinearCombination.status.SUCCESS, true, prefixes), this.self());
+				return;
+			}
+		}
+		this.sender().tell(new Profiler.CompletionMessageLinearCombination(Profiler.CompletionMessageLinearCombination.status.SUCCESS, false, new int[]{}), this.self());
+	}
+
+	private int sum(int[] numbers, int[] prefixes) {
+		int sum = 0;
+		for (int i = 0; i < numbers.length; i++)
+			sum += numbers[i] * prefixes[i];
+		return sum;
 	}
 
 	private void handle(WorkMessageGeneComparision message) {

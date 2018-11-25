@@ -70,7 +70,8 @@ public class Profiler extends AbstractActor {
 		private static final long serialVersionUID = -6823011111281007872L;
 		private CompletionMessageLinearCombination() {}
 		protected status result;
-		private List<List<Integer>> updatedPartOfCurrentRow;
+		private boolean found;
+		private int[] prefixes;
 	}
 
 	@Data @AllArgsConstructor @SuppressWarnings("unused")
@@ -190,35 +191,28 @@ public class Profiler extends AbstractActor {
 					}
 					if (unassignedWork.isEmpty() && busyWorkers.isEmpty()){
 						this.crackPasswords();
-						this.calulateLinearCombination();
+						this.calculateLinearCombination();
 					}
 				}
 				else if (work instanceof Worker.WorkMessageLinearCombination){
 					CompletionMessageLinearCombination completionMessage = (CompletionMessageLinearCombination) message;
 					Worker.WorkMessageLinearCombination workMessage = (Worker.WorkMessageLinearCombination) work;
 					this.report(completionMessage);
-					this.updateCurrentRow(workMessage.getStartIndex(), workMessage.getEndIndex(), completionMessage.updatedPartOfCurrentRow);
-					if (unassignedWork.isEmpty() && busyWorkers.isEmpty()){
-						if (this.currentRowNumber < this.crackedPasswordsAsInteger.size()){
-							this.startLinearCombinationForNewRow();
-						}
-						else {
-							List<Integer> passwordsWithPositivePrefix = this.currentRow.get(this.currentRow.size()-1);
-							for (Map.Entry<Integer,String> entry : this.plainTextPasswords.entrySet()){
-								Integer id = entry.getKey();
-								String plainTextPassword = entry.getValue();
 
-								int index = passwordsWithPositivePrefix.indexOf(Integer.parseInt(plainTextPassword));
-								if (index < 0) {
-									this.prefixes.put(id, -1);
-								}
-								else {
-									this.prefixes.put(id, 1);
-								}
-							}
-							this.log.info("FINAL PASSWORDS WITH PREFIX 1: " + Arrays.toString(passwordsWithPositivePrefix.toArray()));
-							this.startGeneComparision();
-						}
+                    if (!completionMessage.found) {
+                        this.calculateLinearCombination();
+                    } else {
+						this.unassignedWork.clear();
+
+                        int[] prefixes = completionMessage.prefixes;
+
+                        int i = 0;
+                        for (Integer id : this.plainTextPasswords.keySet()){
+                            this.prefixes.put(id, prefixes[i]);
+                            i++;
+                        }
+                        this.log.info("FINAL PASSWORDS WITH PREFIX 1: " + Arrays.toString(prefixes));
+                        this.startGeneComparision();
 					}
 				}
 				else if (work instanceof Worker.WorkMessageGeneComparision){
@@ -334,42 +328,19 @@ public class Profiler extends AbstractActor {
 		}
 	}
 
-	private	void calulateLinearCombination(){
-		int sum = 0;
-		//this.crackedPasswordsAsInteger = new ArrayList<>(Arrays.asList(3,2,5));
-		for (int i = 0; i < this.crackedPasswordsAsInteger.size(); i++){
-			sum += crackedPasswordsAsInteger.get(i);
-		}
-		this.log.info("Sum of passwords: " + sum);
+	private long nextToSendLinearCombinationValue = 0;
 
-		this.currentRow = new ArrayList<>(Collections.nCopies(sum/2+1, null));
+	private	void calculateLinearCombination(){
+	    final int packageSize = 10000;
 
-		this.currentRow.set(0, new ArrayList<>());
-		ArrayList<Integer> firstValue = new ArrayList<>();
-		firstValue.add(crackedPasswordsAsInteger.get(0));
-		this.currentRow.set(crackedPasswordsAsInteger.get(0), firstValue);
-		this.currentRowNumber = 1;
-
-		this.startLinearCombinationForNewRow();
-	}
-
-	private void startLinearCombinationForNewRow(){
-		List<List<Integer>> previousRow = new ArrayList<>(this.currentRow);
-
-		this.log.info("Current Row: " + this.currentRowNumber);
-
-		final int packageSize = 10000;
-		for (int i = 0; i < previousRow.size(); i += packageSize){
-			this.assign(new Worker.WorkMessageLinearCombination(previousRow, crackedPasswordsAsInteger.get(this.currentRowNumber), i, Math.min(i+packageSize, previousRow.size())));
-		}
-
-		this.currentRowNumber++;
-	}
-
-	private void updateCurrentRow(int startIndex, int endIndex, List<List<Integer>> updatedPartOfCurrentRow) {
-		for (int i = startIndex; i < endIndex; i++){
-			this.currentRow.set(i, updatedPartOfCurrentRow.get(i-startIndex));
-		}
+	    for (int i = 0; i < 50 - unassignedWork.size(); i++) {
+            this.assign(new Worker.WorkMessageLinearCombination(
+                    this.crackedPasswordsAsInteger.stream().mapToInt(j -> j).toArray(),
+                    nextToSendLinearCombinationValue,
+                    nextToSendLinearCombinationValue + packageSize)
+            );
+            nextToSendLinearCombinationValue += packageSize;
+        }
 	}
 
 	private void startGeneComparision() {
