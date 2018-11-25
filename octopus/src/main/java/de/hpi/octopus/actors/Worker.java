@@ -95,6 +95,7 @@ public class Worker extends AbstractActor {
 	@Override
 	public void preStart() {
 		this.cluster.subscribe(this.self(), MemberUp.class);
+		Reaper.watchWithDefaultReaper(this);
 	}
 
 	@Override
@@ -115,6 +116,7 @@ public class Worker extends AbstractActor {
 				.match(WorkMessageLinearCombination.class, this::handle)
 				.match(WorkMessageGeneComparision.class, this::handle)
 				.match(WorkMessageFindHash.class, this::handle)
+				.match(Profiler.PoisonPillMessage.class, message -> this.getContext().stop(this.getSelf()))
 				.matchAny(object -> this.log.info("Received unknown message: \"{}\"", object.toString()))
 				.build();
 	}

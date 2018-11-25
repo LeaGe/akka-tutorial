@@ -1,6 +1,9 @@
 package de.hpi.octopus.actors;
 
+import java.io.File;
+import java.io.IOException;
 import java.io.Serializable;
+import java.nio.charset.Charset;
 import java.util.*;
 
 import akka.actor.AbstractActor;
@@ -12,6 +15,9 @@ import akka.event.LoggingAdapter;
 import de.hpi.octopus.actors.Worker.WorkMessage;
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVParser;
+import org.apache.commons.csv.CSVRecord;
 
 public class Profiler extends AbstractActor {
 
@@ -28,6 +34,10 @@ public class Profiler extends AbstractActor {
 	////////////////////
 	// Actor Messages //
 	////////////////////
+
+    public static class PoisonPillMessage implements Serializable {
+        private static final long serialVersionUID = 4545299634552078209L;
+    }
 	
 	@Data @AllArgsConstructor
 	public static class RegistrationMessage implements Serializable {
@@ -38,15 +48,7 @@ public class Profiler extends AbstractActor {
 	public static class TaskMessage implements Serializable {
 		private static final long serialVersionUID = -8330958742629706628L;
 		private TaskMessage() {}
-		private HashMap<Integer, String> hashedPasswords;
-		private HashMap<Integer, String> genes;
-	}
-
-	@Data @AllArgsConstructor @SuppressWarnings("unused")
-	public static class TaskMessageCrackPasswords implements Serializable {
-		private static final long serialVersionUID = -8330958742629706627L;
-		private TaskMessageCrackPasswords() {}
-		private HashMap<Integer, String> hashedPasswords;
+		private String csvPath;
 	}
 	
 	@Data @AllArgsConstructor @SuppressWarnings("unused")
@@ -102,22 +104,20 @@ public class Profiler extends AbstractActor {
 
 	private final Map<String, String> calculatedPasswordHashes = new HashMap<>();
 	private List<Integer> crackedPasswordsAsInteger = new ArrayList<>();
-	private List<List<Integer>> currentRow = new ArrayList<>();
-	private int currentRowNumber;
 	private final Map<Integer, String> plainTextPasswords = new HashMap<>();
 	private final Map<Integer, Integer> prefixes = new HashMap<>();
 	private final Map<Integer, Pair> longestGeneSubString = new HashMap<>();
 	private Map<Integer, String> genes = new HashMap<>();
 	private final Map<Integer, String> finalHashes = new HashMap<>();
+    private Map<Integer, String> hashedPasswords;
+
+    private long startTime;
 
 	@Data @AllArgsConstructor
 	private final class Pair {
 		public int partnerId;
 		public int length;
 	}
-
-
-	private TaskMessageCrackPasswords task;
 
 	////////////////////
 	// Actor Behavior //
@@ -129,11 +129,25 @@ public class Profiler extends AbstractActor {
 				.match(RegistrationMessage.class, this::handle)
 				.match(Terminated.class, this::handle)
 				.match(TaskMessage.class, this::handle)
-				.match(TaskMessageCrackPasswords.class, this::handle)
 				.match(CompletionMessage.class, this::handle)
-				.matchAny(object -> this.log.info("Received unknown message: \"{}\"", object.toString()))
+                .match(PoisonPillMessage.class, message -> this.getContext().stop(this.getSelf()))
+                .matchAny(object -> this.log.info("Received unknown message: \"{}\"", object.toString()))
 				.build();
 	}
+
+    @Override
+    public void preStart() throws Exception {
+        super.preStart();
+        // Register at this actor system's reaper
+        Reaper.watchWithDefaultReaper(this);
+    }
+
+    @Override
+    public void postStop() throws Exception {
+	    super.postStop();
+        this.idleWorkers.forEach(worker -> worker.tell(new PoisonPillMessage(), ActorRef.noSender()));
+        this.busyWorkers.keySet().forEach(worker -> worker.tell(new PoisonPillMessage(), ActorRef.noSender()));
+    }
 
 	private void handle(RegistrationMessage message) {
 		this.context().watch(this.sender());
@@ -154,18 +168,32 @@ public class Profiler extends AbstractActor {
 		this.log.info("Unregistered {}", message.getActor());
 	}
 
-	private void handle(TaskMessage message){
-		this.handle(new TaskMessageCrackPasswords(message.hashedPasswords));
-		this.genes = message.genes;
+	private void handle(TaskMessage message) {
+	    this.startTime = System.currentTimeMillis();
+
+        File csvData = new File(message.csvPath);
+        CSVParser parser = null;
+        try {
+            parser = CSVParser.parse(csvData, Charset.forName("UTF-8"), CSVFormat.DEFAULT.withDelimiter(';'));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        HashMap<Integer, String> originalPasswordHashes = new HashMap<>();
+        HashMap<Integer, String> originalGeneSequences = new HashMap<>();
+        for (CSVRecord csvRecord : parser) {
+            if (csvRecord.get(0).equals("ID")){
+                continue;
+            }
+            originalPasswordHashes.put(Integer.parseInt(csvRecord.get(0)), csvRecord.get(2));
+            originalGeneSequences.put(Integer.parseInt(csvRecord.get(0)), csvRecord.get(3));
+        }
+
+		this.genes = originalGeneSequences;
+        this.hashedPasswords = originalPasswordHashes;
+		this.begin();
 	}
 	
-	private void handle(TaskMessageCrackPasswords message) {
-		if (this.task != null)
-			this.log.error("The profiler actor can process only one task in its current implementation!");
-		
-		this.task = message;
-
-
+	private void begin() {
 		String[] sixDigitNumbers = this.calculateSixDigitNumbers();
 
 		for (int i = 0; i<sixDigitNumbers.length; i += 100){
@@ -243,9 +271,11 @@ public class Profiler extends AbstractActor {
 					finalHashes.put(workMessage.getId(), completionMessage.hash);
 
 					if (unassignedWork.isEmpty() && busyWorkers.isEmpty()){
-						this.log.info("Done!!!");
+						this.log.info("Done. Below is the final result.");
 
 						finalHashes.forEach((id, hash) -> this.log.warning("ID: " + id + " Hash: " + hash));
+						this.log.info("Time: " + (System.currentTimeMillis() - this.startTime) / 1000);
+                        this.getContext().getSystem().actorSelection("/user/*").tell(new PoisonPillMessage(), ActorRef.noSender());
 					}
 				}
 				break;
@@ -286,7 +316,7 @@ public class Profiler extends AbstractActor {
 	}
 
 	private void report(CompletionMessageLinearCombination completion) {
-		this.log.info("Finished part of line.");
+		this.log.info("Finished checking block of liear combinations.");
 	}
 
 	private void report(CompletionMessageGeneComparsion completion) {
@@ -304,7 +334,7 @@ public class Profiler extends AbstractActor {
 	}
 
 	private void crackPasswords(){
-		for (Map.Entry<Integer,String> entry : this.task.hashedPasswords.entrySet()){
+		for (Map.Entry<Integer,String> entry : this.hashedPasswords.entrySet()){
 			Integer id = entry.getKey();
 			String originalHash = entry.getValue();
 

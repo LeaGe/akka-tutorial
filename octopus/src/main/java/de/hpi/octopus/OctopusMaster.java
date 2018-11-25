@@ -1,15 +1,12 @@
 package de.hpi.octopus;
 
-import java.sql.Array;
-import java.util.HashMap;
-import java.util.Scanner;
-
+import akka.actor.ActorRef;
 import com.typesafe.config.Config;
 
-import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
 import akka.cluster.Cluster;
 import de.hpi.octopus.actors.Profiler;
+import de.hpi.octopus.actors.Reaper;
 import de.hpi.octopus.actors.Worker;
 import de.hpi.octopus.actors.listeners.ClusterListener;
 
@@ -17,17 +14,18 @@ public class OctopusMaster extends OctopusSystem {
 	
 	public static final String MASTER_ROLE = "master";
 
-	public static void start(String actorSystemName, int workers, String host, int port, HashMap<Integer, String> originalPasswordHashes, HashMap<Integer, String> originalGeneSequences) {
+	public static void start(String actorSystemName, int workers, String host, int port, int slaves, String csvPath) {
 
 		final Config config = createConfiguration(actorSystemName, MASTER_ROLE, host, port, host, port);
 		
 		final ActorSystem system = createSystem(actorSystemName, config);
-		
+
 		Cluster.get(system).registerOnMemberUp(new Runnable() {
 			@Override
 			public void run() {
 				system.actorOf(ClusterListener.props(), ClusterListener.DEFAULT_NAME);
-			//	system.actorOf(MetricsListener.props(), MetricsListener.DEFAULT_NAME);
+
+				system.actorOf(Reaper.props(), Reaper.DEFAULT_NAME);
 
 				system.actorOf(Profiler.props(), Profiler.DEFAULT_NAME);
 				
@@ -42,7 +40,7 @@ public class OctopusMaster extends OctopusSystem {
 			//			new ClusterRouterPoolSettings(10000, workers, true, new HashSet<>(Arrays.asList("master", "slave"))))
 			//		.props(Props.create(Worker.class)), "router");
 
-				system.actorSelection("/user/" + Profiler.DEFAULT_NAME).tell(new Profiler.TaskMessage(originalPasswordHashes, originalGeneSequences), ActorRef.noSender());
+				system.actorSelection("/user/" + ClusterListener.DEFAULT_NAME).tell(new ClusterListener.WaitForClusterMessage(slaves, csvPath), ActorRef.noSender());
 			}
 		});
 	}
