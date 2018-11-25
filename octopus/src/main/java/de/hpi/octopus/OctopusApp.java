@@ -1,13 +1,22 @@
 package de.hpi.octopus;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.Reader;
+import java.io.StringReader;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.nio.charset.Charset;
+import java.util.HashMap;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.Parameters;
 import de.hpi.octopus.OctopusMaster;
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVParser;
+import org.apache.commons.csv.CSVRecord;
 
 public class OctopusApp {
 
@@ -31,7 +40,26 @@ public class OctopusApp {
 
             switch (jCommander.getParsedCommand()) {
                 case OctopusMaster.MASTER_ROLE:
-                    OctopusMaster.start(ACTOR_SYSTEM_NAME, masterCommand.workers, masterCommand.host, masterCommand.port);
+                    System.out.println(masterCommand.csv);
+                    File csvData = new File(masterCommand.csv);
+                    CSVParser parser = CSVParser.parse(csvData, Charset.forName("UTF-8"), CSVFormat.DEFAULT.withDelimiter(';'));
+                    HashMap<Integer, String> originalPasswordHashes = new HashMap<>();
+                    HashMap<Integer, String> originalGeneSequences = new HashMap<>();
+                    for (CSVRecord csvRecord : parser) {
+                        if (csvRecord.get(0).equals("ID")){
+                            continue;
+                        }
+                        originalPasswordHashes.put(Integer.parseInt(csvRecord.get(0)), csvRecord.get(2));
+                        originalGeneSequences.put(Integer.parseInt(csvRecord.get(0)), csvRecord.get(3));
+                        /*
+                        for (String field : csvRecord) {
+                            System.out.print("\"" + field + "\", ");
+                        }
+                        System.out.println();
+                        */
+                    }
+
+                    OctopusMaster.start(ACTOR_SYSTEM_NAME, masterCommand.workers, masterCommand.host, masterCommand.port, originalPasswordHashes, originalGeneSequences);
                     break;
                 case OctopusSlave.SLAVE_ROLE:
                     OctopusSlave.start(ACTOR_SYSTEM_NAME, slaveCommand.workers, slaveCommand.host, slaveCommand.port, slaveCommand.masterhost, slaveCommand.masterport);
@@ -48,8 +76,10 @@ public class OctopusApp {
                 jCommander.usage(jCommander.getParsedCommand());
             }
             System.exit(1);
+        } catch (IOException e) {
+            e.printStackTrace();
         }
-	}
+    }
 
     abstract static class CommandBase {
 
@@ -84,6 +114,9 @@ public class OctopusApp {
         int getDefaultPort() {
             return DEFAULT_MASTER_PORT;
         }
+
+        @Parameter(names = {"-c", "--csv"}, description = "location of csv-file", required = true)
+        String csv;
     }
 
     @Parameters(commandDescription = "start a slave actor system")

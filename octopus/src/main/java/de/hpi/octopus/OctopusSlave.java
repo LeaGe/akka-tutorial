@@ -7,6 +7,10 @@ import akka.cluster.Cluster;
 import de.hpi.octopus.actors.Worker;
 import de.hpi.octopus.actors.listeners.MetricsListener;
 
+import java.io.UnsupportedEncodingException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+
 public class OctopusSlave extends OctopusSystem {
 
 	public static final String SLAVE_ROLE = "slave";
